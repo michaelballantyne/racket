@@ -2634,5 +2634,27 @@
 (test 'outer dynamic-require ''definition-context-outside-edge-splice 'res)
 
 ;; ----------------------------------------
+;; Check that `syntax-local-bind-syntaxes` returns identifiers with intdef
+;; scopes attached and use-site scopes removed.
+(let ()
+  (define res
+    (let ()
+      ; define and use in same definition context to trigger use-site scope
+      (define-syntax m
+        (lambda (stx)
+          (syntax-case stx ()
+            [(_ arg)
+             (let ()
+               (define ctx (syntax-local-make-definition-context))
+               (define orig-id #'arg)
+               (define bind-id (car (syntax-local-bind-syntaxes (list orig-id) #f ctx)))
+               (define scoped-id
+                 (syntax-local-identifier-as-binding
+                   (internal-definition-context-introduce ctx orig-id 'add)))
+               #`#,(bound-identifier=? bind-id scoped-id))])))
+      (m x)))
+  (test #t values res))
+
+;; ----------------------------------------
 
 (report-errs)

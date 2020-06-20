@@ -121,7 +121,9 @@
                                    (maybe-install-free=id-in-context! val intdef-id phase local-ctx))
                                  (env-mixin intdef-id sym val (make-weak-hasheq)))
                                (unbox env-mixins)))
-  (log-expand ctx 'exit-local-bind))
+  (log-expand ctx 'exit-local-bind)
+  (for/list ([id intdef-ids])
+    (flip-introduction-scopes id ctx)))
 
 ;; internal-definition-context-binding-identifiers
 (define (internal-definition-context-binding-identifiers intdef)
