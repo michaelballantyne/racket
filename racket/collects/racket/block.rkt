@@ -22,7 +22,7 @@
             [stoplist (list #'begin #'define-syntaxes #'define-values)]
             [init-exprs (let ([v (syntax->list stx)])
                           (unless v (raise-syntax-error #f "bad syntax" stx))
-                          (cdr v))]
+                          (map (lambda (stx) (internal-definition-context-add-scopes def-ctx stx)) (cdr v)))]
             [exprs
              (let loop ([todo init-exprs] [r '()])
                (if (null? todo)
@@ -36,11 +36,9 @@
                       (andmap identifier? (syntax->list #'(id ...)))
                       (with-syntax ([rhs (local-transformer-expand
                                           #'rhs 'expression null)])
-                        (syntax-local-bind-syntaxes
-                         (syntax->list #'(id ...))
-                         #'rhs def-ctx)
-                        (with-syntax ([(id ...) (map syntax-local-identifier-as-binding
-                                                     (syntax->list #'(id ...)))])
+                        (with-syntax ([(id ...) (syntax-local-bind-syntaxes
+                                                  (syntax->list #'(id ...))
+                                                  #'rhs def-ctx)])
                           (loop todo (cons (datum->syntax
                                             expr
                                             (list #'define-syntaxes #'(id ...) #'rhs)
@@ -50,9 +48,7 @@
                      [(define-values (id ...) rhs)
                       (andmap identifier? (syntax->list #'(id ...)))
                       (let ([ids (syntax->list #'(id ...))])
-                        (syntax-local-bind-syntaxes ids #f def-ctx)
-                        (with-syntax ([(id ...) (map syntax-local-identifier-as-binding
-                                                       (syntax->list #'(id ...)))])
+                        (with-syntax ([(id ...) (syntax-local-bind-syntaxes ids #f def-ctx)])
                           (loop todo (cons (datum->syntax
                                             expr
                                             (list #'define-values #'(id ...) #'rhs)
