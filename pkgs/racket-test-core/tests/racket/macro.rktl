@@ -2728,6 +2728,7 @@
 ;; ----------------------------------------
 ;; Check that `syntax-local-bind-syntaxes` returns identifiers with intdef
 ;; scopes attached and use-site scopes removed.
+
 (let ()
   (define res
     (let ()
@@ -2746,6 +2747,18 @@
                #`#,(bound-identifier=? bind-id scoped-id))])))
       (m x)))
   (test #t values res))
+
+;; ----------------------------------------
+;; Check that definitions in `block` don't capture introduced references
+
+(let ()
+  (define x 'outer)
+  (define-syntax-rule (m) x)
+  (define res
+   (block
+     (define x 'inner)
+     (m)))
+  (test 'outer values res))
 
 ;; ----------------------------------------
 
