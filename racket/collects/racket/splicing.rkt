@@ -305,54 +305,53 @@
 (define-syntax (expand-ssp-body stx)
   (syntax-case stx ()
     [(_ binds orig-ids body)
-     (let ([ctx (syntax-local-make-definition-context #f #f)])
-       (let ([body (with-continuation-mark
-                    current-parameter-environment
-                    (extend-parameter-environment (current-parameter-environment) #'binds)
-                    (local-expand #'(force-expand body)
-                                  (syntax-local-context)
-                                  null ;; `force-expand' actually determines stopping places
-                                  ctx))])
-         (let ([body
-                ;; Extract expanded body out of `body':
-                (syntax-case body (quote)
-                  [(quote body) #'body])])
-           (syntax-case body ( begin
-                               define-values
-                               define-syntaxes
-                               begin-for-syntax
-                               module
-                               module*
-                               #%require
-                               #%provide
-                               #%declare )
-              [(begin expr ...)
-               (syntax/loc/props body
-                 (begin (expand-ssp-body binds orig-ids expr) ...))]
-              [(define-values (id ...) rhs)
-               (syntax/loc/props body
-                 (define-values (id ...)
-                   (let-local-keys binds rhs)))]
-              [(define-syntaxes ids rhs)
-               (syntax/loc/props body
-                 (define-syntaxes ids (wrap-param-et rhs binds)))]
-              [(begin-for-syntax e ...)
-               (syntax/loc/props body
-                 (begin-for-syntax (wrap-param-et e binds) ...))]
-              [(module . _) body]
-              [(module* name #f form ...)
-               (datum->syntax body
-                              (list #'module* #'name #f
-                                    #`(expand-ssp-module-begin
-                                       binds orig-ids
-                                       #,body name form ...))
-                              body)]
-              [(module* . _) body]
-              [(#%require . _) body]
-              [(#%provide . _) body]
-              [(#%declare . _) body]
-              [expr (syntax/loc body
-                      (let-local-keys binds expr))]))))]))
+     (let ([body (with-continuation-mark
+                  current-parameter-environment
+                  (extend-parameter-environment (current-parameter-environment) #'binds)
+                  (local-expand #'(force-expand body)
+                                (syntax-local-context)
+                                null ;; `force-expand' actually determines stopping places
+                                ))])
+       (let ([body
+              ;; Extract expanded body out of `body':
+              (syntax-case body (quote)
+                [(quote body) #'body])])
+         (syntax-case body ( begin
+                             define-values
+                             define-syntaxes
+                             begin-for-syntax
+                             module
+                             module*
+                             #%require
+                             #%provide
+                             #%declare )
+            [(begin expr ...)
+             (syntax/loc/props body
+               (begin (expand-ssp-body binds orig-ids expr) ...))]
+            [(define-values (id ...) rhs)
+             (syntax/loc/props body
+               (define-values (id ...)
+                 (let-local-keys binds rhs)))]
+            [(define-syntaxes ids rhs)
+             (syntax/loc/props body
+               (define-syntaxes ids (wrap-param-et rhs binds)))]
+            [(begin-for-syntax e ...)
+             (syntax/loc/props body
+               (begin-for-syntax (wrap-param-et e binds) ...))]
+            [(module . _) body]
+            [(module* name #f form ...)
+             (datum->syntax body
+                            (list #'module* #'name #f
+                                  #`(expand-ssp-module-begin
+                                     binds orig-ids
+                                     #,body name form ...))
+                            body)]
+            [(module* . _) body]
+            [(#%require . _) body]
+            [(#%provide . _) body]
+            [(#%declare . _) body]
+            [expr (syntax/loc body
+                    (let-local-keys binds expr))])))]))
 
 (define-syntax (expand-ssp-module-begin stx)
   (syntax-case stx ()
