@@ -2434,7 +2434,7 @@
                                 intdef)
     (define-values [value target]
       (syntax-local-value/immediate
-       (internal-definition-context-introduce intdef #'add1-indirect 'add)
+       (internal-definition-context-introduce intdef (syntax-local-introduce #'add1-indirect) 'add)
        #f
        (list intdef)))
     #`'#,(indirect-rename-transformer? value))
@@ -2650,7 +2650,7 @@
                (define bind-id (car (syntax-local-bind-syntaxes (list orig-id) #f ctx)))
                (define scoped-id
                  (syntax-local-identifier-as-binding
-                   (internal-definition-context-introduce ctx orig-id 'add)))
+                   (internal-definition-context-introduce ctx orig-id 'add) ctx))
                #`#,(bound-identifier=? bind-id scoped-id))])))
       (m x)))
   (test #t values res))

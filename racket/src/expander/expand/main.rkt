@@ -449,6 +449,11 @@
     (define sc (new-scope 'use-site))
     (define b (root-expand-context-use-site-scopes ctx))
     (set-box! b (cons sc (unbox b)))
+
+    (define def-ctx-b (expand-context-def-ctx-scopes ctx))
+    (when def-ctx-b
+      (set-box! def-ctx-b (cons sc (unbox def-ctx-b))))
+
     (values (add-scope s sc) (list sc))]
    [else (values s null)]))
 
