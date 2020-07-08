@@ -2540,5 +2540,99 @@
           (def-h h x)]
     (test 'ok values (f 'ok))))
 
+;; ----------------------------------------
+;; Check definition context outside-edge scope behavior
+
+(module definition-context-outside-edge-macro-defs racket/base
+  (require (for-syntax racket/base))
+  (provide simple-let-syntax partial-expand-in-ctx)
+
+  (define-syntax (simple-let-syntax stx)
+    (syntax-case stx ()
+      [(_ [v e] b)
+       (let ([ctx (syntax-local-make-definition-context)])
+         (syntax-local-bind-syntaxes
+           (list (internal-definition-context-add-scopes ctx #'v))
+           #'e ctx)
+         (local-expand
+           (internal-definition-context-add-scopes ctx #'b)
+           'expression '() ctx))]))
+
+  (define-syntax (partial-expand-in-ctx stx)
+    (syntax-case stx ()
+      [(_ b)
+       (let ([ctx (syntax-local-make-definition-context)])
+         (local-expand
+           (internal-definition-context-add-scopes ctx #'b)
+           'expression (list #'#%expression) ctx))])))
+
+;; The scope should prevent introduced reference capture
+(module definition-context-outside-edge-introduced-reference racket/base
+  (require 'definition-context-outside-edge-macro-defs (for-syntax racket/base))
+  (provide res)
+  (define-syntax-rule (x) 'outside)
+  (define-syntax-rule (m) (x))
+  (define res
+    (simple-let-syntax [x (lambda (stx) #''captured)]
+      (m))))
+(test 'outside dynamic-require ''definition-context-outside-edge-introduced-reference 'res)
+
+;; The scope should be removed at quote-syntax, either within local-expand
+;; or when expanded later
+(module definition-context-outside-edge-quote-syntax racket/base
+  (require (for-syntax racket/base 'definition-context-outside-edge-macro-defs) (for-meta 2 racket/base))
+  (provide res1 res2)
+  (define-syntax (m1 stx)
+    (define id (simple-let-syntax [m (lambda (stx) #''ignore)]
+                                  #'x))
+    #`(let ([#,id 'bound])
+        x))
+  (define res1 (m1))
+  (define-syntax (m2 stx)
+    (define id (partial-expand-in-ctx (#%expression #'x)))
+    #`(let ([#,id 'bound])
+        x))
+  (define res2 (m2)))
+(test 'bound dynamic-require ''definition-context-outside-edge-quote-syntax 'res1)
+(test 'bound dynamic-require ''definition-context-outside-edge-quote-syntax 'res2)
+
+;; The scope should be added by syntax-local-get-shadower
+(module definition-context-outside-edge-get-shadower racket/base
+  (require 'definition-context-outside-edge-macro-defs (for-syntax racket/base))
+  (provide res)
+  (define-for-syntax id (car (generate-temporaries '(x))))
+  (define-syntax (ref stx)
+    (syntax-local-get-shadower (syntax-local-introduce id)))
+  (define-syntax (binding stx)
+    #`(simple-let-syntax [#,(syntax-local-identifier-as-binding
+                              (syntax-local-introduce id))
+                          (lambda (stx)
+                            #''bound)]
+        (ref)))
+  (define res (binding)))
+(test 'bound dynamic-require ''definition-context-outside-edge-get-shadower 'res)
+
+;; internal-definition-context-remove-scopes should remove the scope
+(module definition-context-outside-edge-splice racket/base
+  (require (for-syntax racket/base))
+  (provide res)
+  (define-syntax (simple-let-syntax-add-remove stx)
+    (syntax-case stx ()
+      [(_ [v e] b)
+       (let ([ctx (syntax-local-make-definition-context)])
+         (syntax-local-bind-syntaxes
+           (list (internal-definition-context-add-scopes ctx #'v))
+           #'e ctx)
+         (local-expand
+           (internal-definition-context-remove-scopes
+             ctx
+             (internal-definition-context-add-scopes ctx #'b))
+           'expression '() ctx))]))
+  (define-syntax-rule (m) 'outer)
+  (define res (simple-let-syntax-add-remove [m (lambda (stx) #''inner)]
+                (m))))
+(test 'outer dynamic-require ''definition-context-outside-edge-splice 'res)
+
+;; ----------------------------------------
 
 (report-errs)

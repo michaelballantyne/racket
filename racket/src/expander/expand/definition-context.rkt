@@ -24,6 +24,8 @@
          internal-definition-context-introduce
          internal-definition-context-seal
          identifier-remove-from-definition-context
+         internal-definition-context-add-scopes
+         internal-definition-context-remove-scopes
          
          make-local-expand-context
          flip-introduction-scopes
@@ -35,7 +37,8 @@
          intdefs-or-false?-string)
 
 (struct internal-definition-context (frame-id      ; identifies the frame for use-site scopes
-                                     scope         ; scope that represents the context
+                                     outside-edge  ; outside-edge scope for the context
+                                     inside-edge   ; inside-edge scope for the context
                                      add-scope?    ; whether the scope is auto-added for expansion
                                      env-mixins    ; bindings for this context: box of list of mix-binding
                                      parent-ctx))  ; parent definition context or #f
@@ -54,11 +57,12 @@
   (define frame-id (or (root-expand-context-frame-id ctx)
                        (and parent-ctx (internal-definition-context-frame-id parent-ctx))
                        (gensym)))
-  (define sc (new-scope 'intdef))
+  (define outside-edge (new-scope 'intdef-outside))
+  (define inside-edge (new-scope 'intdef))
   (define def-ctx-scopes (expand-context-def-ctx-scopes ctx))
   (when def-ctx-scopes
-    (set-box! def-ctx-scopes (cons sc (unbox def-ctx-scopes))))
-  (internal-definition-context frame-id sc add-scope? (box null) parent-ctx))
+    (set-box! def-ctx-scopes (cons inside-edge (cons outside-edge (unbox def-ctx-scopes)))))
+  (internal-definition-context frame-id outside-edge inside-edge add-scope? (box null) parent-ctx))
 
 ;; syntax-local-bind-syntaxes
 (define (syntax-local-bind-syntaxes ids s intdef [extra-intdefs '()])
@@ -166,6 +170,37 @@
   (for/fold ([id id]) ([intdef (in-intdefs intdef)])
     (internal-definition-context-introduce intdef id 'remove)))
 
+
+;; internal-definition-context-add-scopes
+(define (internal-definition-context-add-scopes intdef s)
+  (unless (syntax? s)
+    (raise-argument-error 'internal-definition-context-add-scopes "syntax?" s))
+  (unless (internal-definition-context? intdef)
+    (raise-argument-error 'internal-definition-context-add-scopes
+                          "internal-definition-context?"
+                          intdef))
+  (add-scope
+    (add-scope
+      s
+      (internal-definition-context-inside-edge intdef))
+    (internal-definition-context-outside-edge intdef)))
+
+;; internal-definition-context-remove-scopes
+(define (internal-definition-context-remove-scopes intdef s)
+  (unless (syntax? s)
+    (raise-argument-error 'internal-definition-context-remove-scopes "syntax?" s))
+  (unless (internal-definition-context? intdef)
+    (raise-argument-error 'internal-definition-context-remove-scopes
+                          "internal-definition-context?"
+                          intdef))
+
+  (remove-scope
+    (remove-scope
+      s
+      (internal-definition-context-inside-edge intdef))
+    (internal-definition-context-outside-edge intdef)))
+
+
 ;; For contract errors:
 (define (intdefs? x)
   (or (internal-definition-context? x)
@@ -222,7 +257,7 @@
   (for/fold ([s s]) ([intdef (in-intdefs intdefs)]
                      #:when (or always?
                                 (internal-definition-context-add-scope? intdef)))
-    (action s (internal-definition-context-scope intdef))))
+    (action s (internal-definition-context-inside-edge intdef))))
 
 ;; ----------------------------------------
 

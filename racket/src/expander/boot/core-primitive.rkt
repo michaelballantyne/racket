@@ -160,6 +160,8 @@
                       internal-definition-context-introduce
                       internal-definition-context-seal
                       identifier-remove-from-definition-context
+                      internal-definition-context-add-scopes
+                      internal-definition-context-remove-scopes
                       
                       make-set!-transformer
                       prop:set!-transformer
