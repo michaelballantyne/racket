@@ -1154,7 +1154,7 @@
          (for-each
           (lambda (name loc ctc)
             (let ([v (bound-identifier-mapping-get defined-names-table
-                                                   (syntax-local-identifier-as-binding name def-ctx)
+                                                   name
                                                    (lambda () #f))])
               (unless v
                 (raise-stx-err (format "undefined export ~a" (syntax-e name))))
