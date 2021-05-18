@@ -18,6 +18,7 @@
          "../expand/syntax-local.rkt"
          "../expand/definition-context.rkt"
          "../expand/local-expand.rkt"
+         "../expand/apply-transformer.rkt"
          "../syntax/api.rkt"
          "../syntax/api-taint.rkt"
          "../syntax/error.rkt"
@@ -150,6 +151,8 @@
                       syntax-local-submodules
                       
                       syntax-local-get-shadower
+
+                      syntax-local-apply-transformer
                       
                       local-expand
                       local-expand/capture-lifts

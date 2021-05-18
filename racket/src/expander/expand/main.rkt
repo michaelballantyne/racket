@@ -66,7 +66,10 @@
          increment-binding-layer
          accumulate-def-ctx-scopes
          rename-transformer-target-in-context
-         maybe-install-free=id-in-context!)
+         maybe-install-free=id-in-context!
+         
+         maybe-create-use-site-scope
+         maybe-add-post-expansion)
 
 ;; ----------------------------------------
 
@@ -382,7 +385,8 @@
    (define intro-scope (new-scope 'macro))
    (define intro-s (flip-scope disarmed-s intro-scope))
    ;; In a definition context, we need use-site scopes
-   (define-values (use-s use-scopes) (maybe-add-use-site-scope intro-s ctx binding))
+   (define use-scopes (maybe-create-use-site-scope ctx binding))
+   (define use-s (add-scopes intro-s use-scopes))
    ;; Avoid accidental transfer of taint-controlling properties:
    (define cleaned-s (syntax-remove-taint-dispatch-properties use-s))
    ;; Prepare to accumulate definition contexts created by the transformer
@@ -452,7 +456,7 @@
                            "received" transformed-s))
   transformed-s)
 
-(define (maybe-add-use-site-scope s ctx binding)
+(define (maybe-create-use-site-scope ctx binding)
   (cond
    [(and (root-expand-context-use-site-scopes ctx)
          (matching-frame? (root-expand-context-frame-id ctx)
@@ -468,8 +472,8 @@
     (when def-ctx-b
       (set-box! def-ctx-b (cons sc (unbox def-ctx-b))))
 
-    (values (add-scope s sc) (list sc))]
-   [else (values s null)]))
+    (list sc)]
+   [else null]))
 
 (define (matching-frame? current-frame-id bind-frame-id)
   (and current-frame-id

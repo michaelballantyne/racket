@@ -39,6 +39,19 @@
                           intdef-ctxs))
   (unless (syntax-transforming?)
     (raise-arguments-error 'local-apply-transformer "not currently expanding"))
+
+  #;(let ([transformer-proc (if (set!-transformer? transformer)
+                               (set!-transformer-procedure transformer)
+                               transformer)])
+         (syntax-local-apply-transformer transformer-proc
+                                         (generate-temporary 'local-apply-transformer)
+                                         context
+                                         (cond
+                                           [(null? intdef-ctxs) (syntax-local-make-definition-context #f #f)]
+                                           [(= (length intdef-ctxs) 1) (car intdef-ctxs)]
+                                           [else (error 'local-apply-transformer "only one intdef supported now")])
+                                         stx))
+  
   (let* ([intdef-ctx (syntax-local-make-definition-context #f #f)]
          [transformer-proc (if (set!-transformer? transformer)
                                (set!-transformer-procedure transformer)
