@@ -1,19 +1,8 @@
 #lang racket/base
 
-(require (for-template racket/base)
-         racket/syntax)
+(require racket/syntax)
 
 (provide local-apply-transformer)
-
-(define ((make-quoting-transformer transformer-proc) stx)
-  (syntax-case stx ()
-    [(_ form)
-     (let ([result (transformer-proc #'form)])
-       (unless (syntax? result)
-         (raise-arguments-error 'local-apply-transformer
-                                "received value from syntax expander was not syntax"
-                                "received" result))
-       #`(quote #,result))]))
 
 (define (local-apply-transformer transformer stx context [intdef-ctxs '()])
   (unless (or (set!-transformer? transformer)
@@ -40,29 +29,14 @@
   (unless (syntax-transforming?)
     (raise-arguments-error 'local-apply-transformer "not currently expanding"))
 
-  #;(let ([transformer-proc (if (set!-transformer? transformer)
-                               (set!-transformer-procedure transformer)
-                               transformer)])
-         (syntax-local-apply-transformer transformer-proc
-                                         (generate-temporary 'local-apply-transformer)
-                                         context
-                                         (cond
-                                           [(null? intdef-ctxs) (syntax-local-make-definition-context #f #f)]
-                                           [(= (length intdef-ctxs) 1) (car intdef-ctxs)]
-                                           [else (error 'local-apply-transformer "only one intdef supported now")])
-                                         stx))
-  
-  (let* ([intdef-ctx (syntax-local-make-definition-context #f #f)]
-         [transformer-proc (if (set!-transformer? transformer)
-                               (set!-transformer-procedure transformer)
-                               transformer)]
-         [transformer-id (internal-definition-context-introduce
-                          intdef-ctx
-                          (generate-temporary 'local-apply-transformer))]
-         [intdef-ctxs* (cons intdef-ctx intdef-ctxs)])
-    (syntax-local-bind-syntaxes
-     (list transformer-id)
-     #`(quote #,(make-quoting-transformer transformer-proc))
-     intdef-ctx)
-    (syntax-case (local-expand #`(#,transformer-id #,stx) context '() intdef-ctxs*) (quote)
-      [(quote form) #'form])))
+  (let ([transformer-proc (if (set!-transformer? transformer)
+                              (set!-transformer-procedure transformer)
+                              transformer)])
+    (syntax-local-apply-transformer transformer-proc
+                                    (generate-temporary 'local-apply-transformer)
+                                    context
+                                    (cond
+                                      [(null? intdef-ctxs) #f]
+                                      [(= (length intdef-ctxs) 1) (car intdef-ctxs)]
+                                      [else (error 'local-apply-transformer "only one intdef supported now")])
+                                    stx)))
