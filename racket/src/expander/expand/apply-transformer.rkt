@@ -73,8 +73,6 @@
   (define binding (resolve+shift binding-id (expand-context-phase ctx)
                                  #:ambiguous-value 'ambiguous
                                  #:immediate? #t))
-  
-  (define disarmed-args (transform-syntax-vals syntax-disarm args))
 
   (define intro-scope (new-scope 'macro))
   (define use-scopes (maybe-create-use-site-scope ctx binding))
@@ -84,7 +82,7 @@
     (define use-s (add-scopes intro-s use-scopes))
     use-s)
 
-  (define scoped-args (transform-syntax-vals scope-arg disarmed-args))
+  (define scoped-args (transform-syntax-vals scope-arg args))
 
   (define transformed-vals
     (apply-transformer-in-context transformer scoped-args ctx
