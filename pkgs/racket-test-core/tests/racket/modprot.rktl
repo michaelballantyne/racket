@@ -313,9 +313,9 @@
                   three/normal unsafe))))))
 
 (define-values (zero-c one-c two/no-protect-c two/protect-c 
-                        three/nabbed-c three/pnabbed-c three/snabbed-c 
-                        three/nfnabbed-c three/nfpnabbed-c three/nfsnabbed-c 
-                        three/normal-c unsafe-c)
+                       three/nabbed-c three/pnabbed-c three/snabbed-c 
+                       three/nfnabbed-c three/nfpnabbed-c three/nfsnabbed-c 
+                       three/normal-c unsafe-c)
   (apply
    values
    (let ([ns (make-base-namespace)])
@@ -501,4 +501,67 @@
 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Check syntax-local-apply-transformer does not disarm syntax
+(let ()
+  (define-syntax m (lambda (stx)
+                     (syntax-local-apply-transformer
+                      (lambda (stx)
+                        #`(quote #,(syntax-tainted? (car (syntax-e stx)))))
+                      #f
+                      'expression
+                      #f
+                      (syntax-protect #'(a)))))
+  (test #t values (m)))
+
+; Check syntax-local-apply-transformer runs the transformer with
+; the weaker of the calling macro's code inspector and the inspector
+; associated with the binding of the binding-id argument.
+(parameterize ([current-namespace (make-base-namespace)])
+  ; Trusted DSL expander
+  (eval '(module Exp racket
+           (provide exp)
+           (define-syntax (exp stx)
+             (syntax-case stx ()
+               [(_ (m . rest))
+                (syntax-local-apply-transformer
+                 (syntax-local-value #'m) #'m
+                 'expression #f
+                 #'(m . rest))]))))
+
+  ; Trusted module protecting secret data
+  (eval '(module Secret racket
+           (provide protected-m other-m)
+           (define secret 'secret)
+           (define not-secret 'not-secret)
+           ; Should be allowed to use `datum->syntax` in its own macros
+           (define-syntax (protected-m stx) (syntax-protect #`(begin #,(datum->syntax #'here 'secret) 'safe)))
+           (define-syntax (other-m stx) #'not-secret)))
+
+  ; Sandboxed code...
+  (parameterize ([current-code-inspector (make-inspector (current-code-inspector))])
+    (eval '(require 'Exp 'Secret (for-syntax racket/base)))
+    ; Trusted DSL macro can use datum->syntax to generate reference to secret
+    (test 'safe eval '(exp (protected-m)))
+    ; Sandboxed attacker cannot use datum->syntax in a DSL macro to access secret
+    (define attack-1
+      '(let-syntax ([attack-m (lambda (stx)
+                                (datum->syntax (local-expand #'(other-m) 'expression '())
+                                               'secret))])
+         (exp (attack-m))))
+    (err/rt-test (eval attack-1) exn:fail:syntax?)
+    ; Sandboxed macro cannot use syntax-local-apply-transformer directly to access secret
+    (define attack-2
+      '(let-syntax ([attack-m (lambda (stx)
+                                (syntax-local-apply-transformer
+                                 (lambda ()
+                                   (datum->syntax (local-expand #'(other-m) 'expression '())
+                                                  'secret))
+                                 #'other-m
+                                 'expression #f))])
+         (attack-m)))
+    (err/rt-test (eval attack-2) exn:fail:syntax?)))
+
+
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  
 (report-errs)
