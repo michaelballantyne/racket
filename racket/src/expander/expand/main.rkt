@@ -459,8 +459,13 @@
 (define (maybe-create-use-site-scope ctx binding)
   (cond
    [(and (root-expand-context-use-site-scopes ctx)
-         (matching-frame? (root-expand-context-frame-id ctx)
-                          (binding-frame-id binding)))
+         (or
+          ; conservatively use a use-site scope when the origin of the
+          ; transformer is unknown (as in some uses of
+          ; syntax-local-apply-transformer)
+          (not binding)
+          (matching-frame? (root-expand-context-frame-id ctx)
+                           (binding-frame-id binding))))
     ;; We're in a recursive definition context where use-site scopes
     ;; are needed, so create one, record it, and add to the given
     ;; syntax
