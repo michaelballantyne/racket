@@ -11,7 +11,8 @@
   "../common/contract.rkt"
   "../common/parameter-like.rkt"
   "../namespace/namespace.rkt"
-  "../namespace/inspector.rkt")
+  "../namespace/inspector.rkt"
+  "../syntax/weaker-inspector.rkt")
 
 (provide syntax-local-apply-transformer)
 
@@ -24,6 +25,13 @@
 ; the `local-expand`-like bits are in this function
 (define/who (syntax-local-apply-transformer transformer binding-id context intdef-ctx . args)
   (check who procedure? transformer)
+  (check who
+         (lambda (binding-id)
+           (or (identifier? binding-id)
+               (eq? binding-id #f)))
+         #:contract
+         "(or/c identifier? #f)"
+         binding-id)
   (check who
          (lambda (context)
            (or (list? context)
@@ -53,11 +61,14 @@
                           intdef-ctx))
                        args))
 
-  (define scoped-binding-id (flip-introduction-scopes binding-id ctx))
+  (define scoped-binding-id
+    (and binding-id
+         (flip-introduction-scopes binding-id ctx)))
 
   (define output-vals
     (without-expand-context
-     (apply-transformer transformer
+     (apply-transformer who
+                        transformer
                         scoped-binding-id
                         scoped-args
                         local-ctx)))
@@ -69,10 +80,18 @@
   (apply values result-vals))
 
 ; the macro application-like bits are in this function
-(define (apply-transformer transformer binding-id args ctx)
-  (define binding (resolve+shift binding-id (expand-context-phase ctx)
-                                 #:ambiguous-value 'ambiguous
-                                 #:immediate? #t))
+(define (apply-transformer who transformer binding-id args ctx)
+  (define-values (binding insp-of-t)
+    (if binding-id
+        (let ([binding (resolve+shift binding-id (expand-context-phase ctx)
+                                      #:ambiguous-value 'ambiguous
+                                      #:immediate? #t)])
+          (when (not binding)
+            (error who "unbound identifier: ~v" binding-id))
+          (let-values ([(t primitive? insp-of-t protected?)
+                        (lookup binding ctx binding-id)])
+            (values binding insp-of-t)))
+        (values #f #f)))
 
   (define intro-scope (new-scope 'macro))
   (define use-scopes (maybe-create-use-site-scope ctx binding))
@@ -87,7 +106,7 @@
   (define transformed-vals
     (apply-transformer-in-context transformer scoped-args ctx
                                   intro-scope use-scopes
-                                  binding-id))
+                                  binding-id insp-of-t))
 
   (define (scope-res s)
     (define result-s (flip-scope s intro-scope))
@@ -100,7 +119,7 @@
 
 (define (apply-transformer-in-context transformer args ctx
                                       intro-scope use-scopes
-                                      binding-id)
+                                      binding-id insp-of-t)
 
   (define m-ctx (struct*-copy expand-context ctx
                               [current-introduction-scopes (list intro-scope)]
@@ -112,7 +131,8 @@
                                        (add1 (expand-context-phase ctx)))])
       (parameterize-like
        #:with ([current-expand-context m-ctx]
-               [current-module-code-inspector #f])
+               [current-module-code-inspector
+                (weaker-inspector insp-of-t (current-module-code-inspector))])
        (call-with-continuation-barrier
         (lambda ()
           (call-with-values
