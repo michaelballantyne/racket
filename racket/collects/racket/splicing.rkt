@@ -41,7 +41,7 @@
          (for-meta 2 'syntax/loc/props))
 
 (define-syntax (splicing-local stx)
-  (do-local stx (lambda (def-ctx expand-context sbindings vbindings bodys)
+  (do-local stx (lambda (defctx expand-context sbindings vbindings bodys)
                   (if (eq? 'expression (syntax-local-context))
                       (quasisyntax/loc stx
                         (letrec-syntaxes+values
@@ -50,17 +50,12 @@
                          #,@bodys))
                       ;; Since we alerady have bindings for the current scopes,
                       ;; add an extra scope for re-binding:
-                      (let ([i (make-syntax-introducer #t)])
+                      (let* ([defctx2 (syntax-local-make-definition-context)]
+                             [i (intro (list defctx2))])
                         (with-syntax ([([s-ids s-rhs] ...) (i sbindings)]
                                       [([(v-id ...) v-rhs] ...) (i vbindings)]
                                       [(body ...) (i bodys)]
-                                      [(marked-id markless-id)
-                                       (let ([id #'id])
-                                         ;; The marked identifier should have both the extra
-                                         ;; scope and the intdef scope, to be removed from
-                                         ;; definitions expanded from `body`:
-                                         (list (i (internal-definition-context-introduce def-ctx id))
-                                               id))])
+                                      [defctxs-stx (list defctx defctx2)])
                           (with-syntax ([(top-decl ...)
                                          (if (equal? 'top-level (syntax-local-context))
                                              #'((define-syntaxes (v-id ... ...) (values)))
@@ -70,7 +65,7 @@
                                 top-decl ...
                                 (define-syntaxes s-ids s-rhs) ...
                                 (define-values (v-id ...) v-rhs) ...
-                                (splicing-let-start/body marked-id markless-id body)
+                                (splicing-let-body defctxs-stx body)
                                 ...)))))))))
 
 (define-syntax (splicing-let-syntax stx)
@@ -115,10 +110,7 @@
                               (syntax-property id 'definition-intended-as-local #t)))]
                          [DEF def-id]
                          [rec? rec?]
-                         [(marked-id markless-id)
-                          (let ([id #'id])
-                            (list ((make-syntax-introducer #t) id)
-                                  id))])
+                         [defctxs-stx (list (syntax-local-make-definition-context))])
              (with-syntax ([(top-decl ...)
                             (if (and need-top-decl? (equal? 'top-level (syntax-local-context)))
                                 #'((define-syntaxes (id ... ...) (values)))
@@ -126,40 +118,47 @@
                
                (syntax/loc stx
                  (begin
-                   (splicing-let-start/def marked-id markless-id #f top-decl) ...
-                   (splicing-let-start/def marked-id markless-id rec? (DEF (id ...) expr))
+                   (splicing-let-start/def defctxs-stx #f top-decl) ...
+                   (splicing-let-start/def defctxs-stx rec? (DEF (id ...) expr))
                    ...
-                   (splicing-let-start/body marked-id markless-id body)
+                   (splicing-let-start/body defctxs-stx body)
                    ...))))))]))
 
 (define-syntax (splicing-let-start/def stx)
   (syntax-case stx ()
-    [(_ marked-id markless-id rec? (DEF ids rhs))
+    [(_  defctxs-stx rec? (DEF ids rhs))
      ;; Add the mark to every definition's identifiers; also
      ;; add to the body, if it's a recursively scoped binding:
-     (let ([i (make-syntax-delta-introducer #'marked-id #'markless-id)])
-       #`(DEF #,(i #'ids) #,(if (syntax-e #'rec?)
-                                (i #'rhs)
-                                #'rhs)))]))
+     (let ([i (intro (syntax->datum #'defctxs-stx))])
+       #`(DEF #,(i #'ids)
+              #,(if (syntax-e #'rec?)
+                    (i #'rhs)
+                    #'rhs)))]))
 
 (define-syntax (splicing-let-start/body stx)
   (syntax-case stx ()
-    [(_ marked-id markless-id body)
+    [(_ defctxs-stx body)
      ;; Tenatively add the mark to the body,; we'll remove it on every
      ;; bit of syntax that turns out to be a binding:
-     (let ([i (make-syntax-delta-introducer #'marked-id #'markless-id)])
-       #`(splicing-let-body marked-id markless-id #,(i #'body)))]))
+     (let ([i (intro (syntax->datum #'defctxs-stx))])
+       #`(splicing-let-body defctxs-stx #,(i #'body)))]))
 
-(define-for-syntax ((maybe unintro) form)
+(define-for-syntax ((intro defctxs) form)
+  (for/fold ([form form])
+            ([defctx defctxs])
+    (internal-definition-context-add-scopes defctx form)))
+
+(define-for-syntax ((maybe-unintro defctxs) form)
   (if (syntax-property form 'definition-intended-as-local)
       form
-      (unintro form)))
+      (for/fold ([form form])
+                ([defctx defctxs])
+        (internal-definition-context-remove-scopes defctx form))))
 
 (define-syntax (splicing-let-body stx)
   (syntax-case stx ()
-    [(_ marked-id markless-id body)
-     (let ([unintro (lambda (form)
-                      ((make-syntax-delta-introducer #'marked-id #'markless-id) form 'remove))]
+    [(_ defctxs-stx body)
+     (let ([unintro (maybe-unintro (syntax->datum #'defctxs-stx))]
            [body (local-expand #'body (syntax-local-context) #f)])
        (syntax-case body (begin
                            define-values
@@ -172,16 +171,16 @@
                            #%declare)
          [(begin form ...)
           (syntax/loc/props body
-            (begin (splicing-let-body marked-id markless-id form) ...))]
+            (begin (splicing-let-body defctxs-stx form) ...))]
          [(define-values ids rhs)
           (quasisyntax/loc/props body
-            (define-values #,(map (maybe unintro) (syntax->list #'ids)) rhs))]
+            (define-values #,(map unintro (syntax->list #'ids)) rhs))]
          [(define-syntaxes ids rhs)
           (quasisyntax/loc/props body
-            (define-syntaxes #,(map (maybe unintro) (syntax->list #'ids)) rhs))]
+            (define-syntaxes #,(map unintro (syntax->list #'ids)) rhs))]
          [(begin-for-syntax e ...)
           (syntax/loc/props body
-            (begin-for-syntax (splicing-let-body/et marked-id markless-id e) ...))]
+            (begin-for-syntax (splicing-let-body/et defctxs-stx e) ...))]
          [(module . _) (unintro body)]
          [(module* . _) body]
          [(#%require . _) (unintro body)]
@@ -190,16 +189,17 @@
          [_ body]))]))
 
 (begin-for-syntax
-  (define-for-syntax ((maybe unintro) form)
+  (define-for-syntax ((maybe-unintro defctxs) form)
     (if (syntax-property form 'definition-intended-as-local)
         form
-        (unintro form)))
-
+        (for/fold ([form form])
+                  ([defctx defctxs])
+          (internal-definition-context-remove-scopes defctx form))))
+  
   (define-syntax (splicing-let-body/et stx)
     (syntax-case stx ()
-      [(_ marked-id markless-id body)
-       (let* ([unintro (lambda (form)
-                         ((make-syntax-delta-introducer #'marked-id #'markless-id) form 'remove))]
+      [(_ defctxs-stx body)
+       (let* ([unintro (maybe-unintro (syntax->datum #'defctxs-stx))]
               [body (local-expand #'body (syntax-local-context) #f)])
          (syntax-case body (begin
                              define-values
@@ -212,13 +212,13 @@
                              #%declare)
            [(begin form ...)
             (syntax/loc/props body
-              (begin (splicing-let-body/et marked-id markless-id form) ...))]
+              (begin (splicing-let-body/et defctxs-stx form) ...))]
            [(define-values ids rhs)
             (quasisyntax/loc/props body
-              (define-values #,(map (maybe unintro) (syntax->list #'ids)) rhs))]
+              (define-values #,(map unintro (syntax->list #'ids)) rhs))]
            [(define-syntaxes ids rhs)
             (quasisyntax/loc/props body
-              (define-syntaxes #,(map (maybe unintro) (syntax->list #'ids)) rhs))]
+              (define-syntaxes #,(map unintro (syntax->list #'ids)) rhs))]
            [(begin-for-syntax . es)
             ;; Give up on splicing definitions at phase level 2 and deeper:
             body]
@@ -266,22 +266,19 @@
              (letrec-syntaxes+values ([sids sexpr] ...) ([vids vexpr] ...)
                (#%expression body) ...))
            (with-syntax ([((vid ...) ...) all-vids]
-                         [(marked-id markless-id)
-                          (let ([id #'id])
-                            (list ((make-syntax-introducer #t) id)
-                                  id))])
+                         [defctxs-stx (list (syntax-local-make-definition-context))])
              (with-syntax ([(top-decl ...)
                             (if (equal? 'top-level (syntax-local-context))
                                 #'((define-syntaxes (vid ... ...) (values)))
                                 null)])
                (syntax/loc stx
                  (begin
-                   (splicing-let-start/def marked-id markless-id #f top-decl) ...
-                   (splicing-let-start/def marked-id markless-id #t (define-syntaxes sids sexpr))
+                   (splicing-let-start/def defctxs-stx #f top-decl) ...
+                   (splicing-let-start/def defctxs-stx #t (define-syntaxes sids sexpr))
                    ...
-                   (splicing-let-start/def marked-id markless-id #t (define-values (vid ...) vexpr))
+                   (splicing-let-start/def defctxs-stx #t (define-values (vid ...) vexpr))
                    ...
-                   (splicing-let-start/body marked-id markless-id body ...)))))))]))
+                   (splicing-let-start/body defctxs-stx body ...)))))))]))
 
 ;; ----------------------------------------
 
@@ -460,43 +457,42 @@
        (if (eq? (syntax-local-context) 'expression)
            #'(parameterize ([param/checked value] ...)
                body ...)
-           (let ([introduce (make-syntax-introducer #t)])
-             (with-syntax ([scopeless-id (datum->syntax #f 'scopeless-id)]
-                           [scoped-id (introduce (datum->syntax #f 'scoped-id))]
-                           [(scoped-body ...) (map introduce (syntax->list #'(body ...)))]
+           (let ([defctxs (list (syntax-local-make-definition-context))])
+             (with-syntax ([(scoped-body ...) (map (intro defctxs)
+                                                   (syntax->list #'(body ...)))]
                            ; make sure the parameterization can be GC’d at the top/module level
                            [(free-parameterization-expr ...)
                             (case (syntax-local-context)
                               [(top-level module) #'((set! new-parameterization #f))]
-                              [else #'()])])
+                              [else #'()])]
+                           [defctxs-stx defctxs])
                #'(begin
                    (define new-parameterization
                      (parameterize ([param/checked value] ...)
                        (current-parameterization)))
                    (splicing-parameterize-body
-                    scopeless-id scoped-id new-parameterization scoped-body) ...
+                    defctxs-stx new-parameterization scoped-body) ...
                    free-parameterization-expr ...)))))]))
 
 (define-syntax (splicing-parameterize-body stx)
   (syntax-case stx ()
-    [(_ scopeless-id scoped-id parameterization body)
-     (let* ([introducer (make-syntax-delta-introducer #'scoped-id #'scopeless-id)]
-            [unintro (λ (stx) (introducer stx 'remove))]
+    [(_ defctxs-stx parameterization body)
+     (let* ([unintro (maybe-unintro (syntax->datum #'defctxs-stx))]
             [expanded-body (local-expand #'body (syntax-local-context)
                                          (kernel-form-identifier-list))])
        (kernel-syntax-case expanded-body #f
          [(begin new-body ...)
           (syntax/loc/props expanded-body
             (begin
-              (splicing-parameterize-body scopeless-id scoped-id parameterization new-body)
+              (splicing-parameterize-body defctxs-stx parameterization new-body)
               ...))]
          [(define-values ids rhs)
           (quasisyntax/loc/props expanded-body
-            (define-values #,(map (maybe unintro) (syntax->list #'ids))
+            (define-values #,(map unintro (syntax->list #'ids))
               (call-with-parameterization parameterization (λ () rhs))))]
          [(define-syntaxes ids rhs)
           (quasisyntax/loc/props expanded-body
-            (define-syntaxes #,(map (maybe unintro) (syntax->list #'ids)) rhs))]
+            (define-syntaxes #,(map unintro (syntax->list #'ids)) rhs))]
          [(begin-for-syntax . _) expanded-body]
          [(module . _) (unintro expanded-body)]
          [(module* . _) expanded-body]
