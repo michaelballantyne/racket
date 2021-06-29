@@ -2761,5 +2761,160 @@
   (test 'outer values res))
 
 ;; ----------------------------------------
+;; Test the behavior of the definition context scope operations
+;; in the context of define*-like definitions. The easist way to
+;; do this is via a block macro that supports define*.
+
+(module define-*-definition-context racket/base
+  (require (for-syntax racket/base syntax/transformer syntax/context racket/syntax))
+  (provide do-test)
+
+  (define-syntax define-values*
+    (lambda (stx) (raise-syntax-error #f "define-values* may only be used in block*" stx)))
+  (define-syntax (define* stx)
+    (syntax-case stx ()
+      [(_ a b) (syntax-property #'(define-values* (a) b) 'taint-mode 'transparent-binding)]))
+
+  (define-syntax block*
+    (make-expression-transformer
+     (lambda (stx)
+       (syntax-case stx ()
+         [(_ body ...)
+          (let ()
+            (define stop-list (list #'begin #'define-values #'define-values* #'define-syntaxes))
+            (define ctx-id (list (generate-expand-context #t)))
+            (define top-def-ctx (syntax-local-make-definition-context))
+
+            ; mutated
+            (define stxs '())
+            (define vals '())
+            (define def-ctx top-def-ctx)
+            (define inner-def-ctxs '())
+            (define last-expr #'(void))
+            (define worklist (syntax->list (internal-definition-context-add-scopes top-def-ctx #'(body ...))))
+          
+            (define (pop!)
+              (let ([r (car worklist)])
+                (set! worklist (cdr worklist))
+                r))
+          
+            (define (new-scope!)
+              (set! def-ctx (syntax-local-make-definition-context def-ctx))
+              (set! inner-def-ctxs (cons def-ctx inner-def-ctxs))
+              (set! worklist
+                    (for/list ([s worklist])
+                      (internal-definition-context-add-scopes def-ctx s))))
+      
+            (define (splice stx)
+              (for/fold ([stx stx])
+                        ([def-ctx inner-def-ctxs])
+                (internal-definition-context-remove-scopes def-ctx stx)))
+
+            (let loop ()
+              (define form^ (local-expand (pop!) ctx-id stop-list def-ctx))
+            
+              (syntax-case form^ (begin define-values define-values* define-syntaxes)
+                [(begin . rest)
+                 (set! worklist (append (syntax->list #'rest) worklist))]
+                [(define-syntaxes (v ...) rhs)
+                 (with-syntax* ([rhs^ (local-transformer-expand #'rhs
+                                                                'expression '() def-ctx)]
+                                [(v^ ...) (syntax-local-bind-syntaxes
+                                           (syntax->list (splice #'(v ...)))
+                                           #'rhs^ def-ctx)])
+                   (set! stxs (cons #'[(v^ ...) rhs^] stxs)))]
+                [(define-values (v ...) rhs)
+                 (with-syntax ([(v^ ...) (syntax-local-bind-syntaxes
+                                          (syntax->list (splice #'(v ...)))
+                                          #f top-def-ctx)])
+                   (set! vals (cons #'[(v^ ...) rhs] vals)))]
+                [(define-values* (v ...) rhs)
+                 (begin
+                   (new-scope!)
+                   (with-syntax* ([(v^ ...)
+                                   (syntax-local-bind-syntaxes
+                                    (syntax->list (internal-definition-context-add-scopes def-ctx #'(v ...)))
+                                    #f def-ctx)])
+                     (set! vals (cons #'[(v^ ...) rhs] vals))))]
+                [other-stx
+                 (with-syntax ([tmp (generate-temporary #'tmp)])
+                   (set! vals (cons #'[(tmp) other-stx] vals))
+                   (set! last-expr #'tmp))])
+
+              (unless (null? worklist) (loop)))
+
+            #`(letrec-syntaxes+values #,(reverse stxs)
+                #,(reverse vals)
+                #,last-expr))]))))
+
+  (define (do-test test)
+    ; basic functionality
+    (test
+     11
+     'define-*-definition-context
+     (block*
+      (define f (lambda () y))
+      (define x 5)
+      (set! x (+ x 1))
+      (define* x (+ x 2))
+      (define y (+ x 3))
+      (f)))
+
+    ; correct use-site binder behavior
+    (test
+     '(old new)
+     'define-*-definition-context
+     (let ()
+       (define x 'old)
+       (define y 'old)
+       (block*
+        (define-syntax-rule (m arg1 arg2)
+          (begin
+            (define* arg1 'new)
+            (define arg2 'new)
+            (list x y)))
+        (m x y))))
+
+    ; correct inside-edge scope behavior
+    (test
+     '(inner inner)
+     'define-*-definition-context
+     (let ()
+       (define x 'outer)
+
+       (define-syntax (m1 stx)
+         (with-syntax ([id (syntax-local-introduce #'x)])
+           #'(begin
+               (define id 'inner)
+               id)))
+     
+       (define-syntax (m2 stx)
+         (with-syntax ([id (syntax-local-introduce #'x)])
+           #'(begin
+               (define* id 'inner)
+               id)))
+       (list
+        (block*
+         (m1)
+         (m2)
+         (m2))
+        (block*
+         (m1)
+         (m2)
+         (m2)))))
+
+    ; correct quote-syntax scope stripping
+    (test
+     #t
+     'define-*-definition-context
+     (let ([id1 (quote-syntax x)])
+       (block*
+        (define* x 5)
+        (define id2 (quote-syntax x))
+        (bound-identifier=? id1 id2))))))
+
+((dynamic-require ''define-*-definition-context 'do-test) test)
+
+;; ----------------------------------------
 
 (report-errs)
