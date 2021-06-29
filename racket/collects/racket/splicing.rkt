@@ -41,32 +41,32 @@
          (for-meta 2 'syntax/loc/props))
 
 (define-syntax (splicing-local stx)
-  (do-local stx (lambda (defctx expand-context sbindings vbindings bodys)
-                  (if (eq? 'expression (syntax-local-context))
-                      (quasisyntax/loc stx
-                        (letrec-syntaxes+values
-                         #,sbindings
-                         #,vbindings
-                         #,@bodys))
-                      ;; Since we alerady have bindings for the current scopes,
-                      ;; add an extra scope for re-binding:
-                      (let* ([defctx2 (syntax-local-make-definition-context)]
-                             [i (intro (list defctx2))])
-                        (with-syntax ([([s-ids s-rhs] ...) (i sbindings)]
-                                      [([(v-id ...) v-rhs] ...) (i vbindings)]
-                                      [(body ...) (i bodys)]
-                                      [defctxs-stx (list defctx defctx2)])
-                          (with-syntax ([(top-decl ...)
-                                         (if (equal? 'top-level (syntax-local-context))
-                                             #'((define-syntaxes (v-id ... ...) (values)))
-                                             null)])
-                            (quasisyntax/loc stx
-                              (begin
-                                top-decl ...
-                                (define-syntaxes s-ids s-rhs) ...
-                                (define-values (v-id ...) v-rhs) ...
-                                (splicing-let-body defctxs-stx body)
-                                ...)))))))))
+  (do-local stx #t (lambda (defctx expand-context sbindings vbindings bodys)
+                     (if (eq? 'expression (syntax-local-context))
+                         (quasisyntax/loc stx
+                           (letrec-syntaxes+values
+                               #,sbindings
+                             #,vbindings
+                             #,@bodys))
+                         ;; Since we alerady have bindings for the current scopes,
+                         ;; add an extra scope for re-binding:
+                         (let* ([defctx2 (syntax-local-make-definition-context)]
+                                [i (intro (list defctx2))])
+                           (with-syntax ([([s-ids s-rhs] ...) (i sbindings)]
+                                         [([(v-id ...) v-rhs] ...) (i vbindings)]
+                                         [(body ...) (i bodys)]
+                                         [defctxs-stx (list defctx defctx2)])
+                             (with-syntax ([(top-decl ...)
+                                            (if (equal? 'top-level (syntax-local-context))
+                                                #'((define-syntaxes (v-id ... ...) (values)))
+                                                null)])
+                               (quasisyntax/loc stx
+                                 (begin
+                                   top-decl ...
+                                   (define-syntaxes s-ids s-rhs) ...
+                                   (define-values (v-id ...) v-rhs) ...
+                                   (splicing-let-body defctxs-stx body)
+                                   ...)))))))))
 
 (define-syntax (splicing-let-syntax stx)
   (do-let-syntax stx #f #f #'let-syntax #'define-syntaxes #f))
