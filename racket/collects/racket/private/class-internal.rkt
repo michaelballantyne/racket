@@ -368,8 +368,11 @@
                  defn-or-expr
                  expand-context
                  stop-forms
-                 def-ctx))])
-        (let loop ([l defn-and-exprs])
+                 def-ctx))]
+             [defn-and-exprs-in-scope
+               (for/list ([s defn-and-exprs])
+                 (internal-definition-context-add-scopes def-ctx s))])
+        (let loop ([l defn-and-exprs-in-scope])
           (if (null? l)
               null
               (let ([e (expand (car l))])
@@ -388,9 +391,7 @@
                                          #'rhs
                                          'expression
                                          null)])
-                       (syntax-local-bind-syntaxes (syntax->list #'(id ...)) #'rhs def-ctx)
-                       (with-syntax ([(id ...) (map (lambda (id) (syntax-local-identifier-as-binding id def-ctx))
-                                                    (syntax->list #'(id ...)))])
+                       (with-syntax ([(id ...) (syntax-local-bind-syntaxes (syntax->list #'(id ...)) #'rhs def-ctx)])
                          (cons (copy-prop (syntax/loc e (define-syntaxes (id ...) rhs))
                                           'disappeared-use 'origin 'disappeared-binding)
                                (loop (cdr l))))))]
@@ -701,8 +702,7 @@
                                       id2))]
                [bind-local-id (lambda (orig-id)
                                 (let ([l (localize/set-flag orig-id)]
-                                      [id (syntax-local-identifier-as-binding orig-id def-ctx)])
-                                  (syntax-local-bind-syntaxes (list id) #f def-ctx)
+                                      [id (car (syntax-local-bind-syntaxes (list orig-id) #f def-ctx))])
                                   (bound-identifier-mapping-put!
                                    localized-map
                                    id
@@ -1460,8 +1460,6 @@
                                                    proc))))))
                                       methods)))]
                                 [lookup-localize-cdr (lambda (p) (lookup-localize (cdr p)))])
-                            
-                            (internal-definition-context-seal def-ctx)
                             
                             ;; ---- build final result ----
                             (with-syntax ([public-names (map lookup-localize-cdr publics)]
