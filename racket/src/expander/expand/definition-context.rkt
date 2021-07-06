@@ -56,9 +56,13 @@
               (internal-definition-context? parent-ctx))
     (raise-argument-error 'syntax-local-make-definition-context "(or/c #f internal-definition-context?)" parent-ctx))
   (define ctx (get-current-expand-context 'syntax-local-make-definition-context))
-  (define frame-id (or (root-expand-context-frame-id ctx)
-                       (and parent-ctx (internal-definition-context-frame-id parent-ctx))
-                       (gensym)))
+  (define frame-id
+    ; keep parent or context frame-id in order to add use-site scopes to uses of spliced macros
+    (or (and parent-ctx (internal-definition-context-frame-id parent-ctx))
+        ; but if the context is 'expression, no splicing is possible
+        (and (not (eq? 'expression (expand-context-context ctx)))
+             (root-expand-context-frame-id ctx))
+        (gensym)))
   (define outside-edge (new-scope 'intdef-outside))
   (define inside-edge (new-scope 'intdef))
   (define def-ctx-scopes (expand-context-def-ctx-scopes ctx))
@@ -300,16 +304,23 @@
                         (or (root-expand-context-use-site-scopes ctx)
                             (box null))))]
                 [frame-id #:parent root-expand-context
-                          ;; If there are multiple definition contexts in `intdefs`
-                          ;; and if they have different frame IDs, then we conservatively
-                          ;; turn on use-site scopes for all frame IDs
-                          (for/fold ([frame-id (root-expand-context-frame-id ctx)]) ([intdef (in-intdefs intdefs)])
-                            (define i-frame-id (internal-definition-context-frame-id intdef))
-                            (cond
-                             [(and frame-id i-frame-id (not (eq? frame-id i-frame-id)))
-                              ;; Special ID 'all means "use-site scopes for all expansions"
-                              'all]
-                             [else (or frame-id i-frame-id)]))]
+                          (cond
+                            [(internal-definition-context? intdefs)
+                             (internal-definition-context-frame-id intdefs)]
+                            [(not intdefs) (root-expand-context-frame-id ctx)]
+                            ;; Backwards compatible behavior:
+                            ;; If there are multiple definition contexts in `intdefs`
+                            ;; and if they have different frame IDs, then we conservatively
+                            ;; turn on use-site scopes for all frame IDs
+                            [(list? intdefs)
+                             (for/fold ([frame-id (root-expand-context-frame-id ctx)])
+                                        ([intdef (in-intdefs intdefs)])
+                                (define i-frame-id (internal-definition-context-frame-id intdef))
+                                (cond
+                                  [(and frame-id i-frame-id (not (eq? frame-id i-frame-id)))
+                                   ;; Special ID 'all means "use-site scopes for all expansions"
+                                   'all]
+                                  [else (or frame-id i-frame-id)]))])]
                 [post-expansion #:parent root-expand-context
                                 (let ([pe (and same-kind?
                                                (or (pair? context)
