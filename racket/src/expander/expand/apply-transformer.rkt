@@ -89,7 +89,7 @@
           (when (not binding)
             (error who "unbound identifier: ~v" binding-id))
           (let-values ([(t primitive? insp-of-t protected?)
-                        (lookup binding ctx binding-id)])
+                        (lookup binding ctx binding-id #:out-of-context-as-variable? #t)])
             (values binding insp-of-t)))
         (values #f #f)))
 
