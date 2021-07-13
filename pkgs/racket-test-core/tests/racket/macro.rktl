@@ -2810,6 +2810,11 @@
                         ([def-ctx inner-def-ctxs])
                 (internal-definition-context-remove-scopes def-ctx stx)))
 
+            (define (drop-use-sites stx)
+              (for/fold ([stx stx])
+                        ([def-ctx (cons top-def-ctx inner-def-ctxs)])
+                (syntax-local-identifier-as-binding stx def-ctx)))
+
             (let loop ()
               (define form^ (local-expand (pop!) ctx-id stop-list def-ctx))
             
@@ -2833,7 +2838,7 @@
                    (new-scope!)
                    (with-syntax* ([(v^ ...)
                                    (syntax-local-bind-syntaxes
-                                    (syntax->list (internal-definition-context-add-scopes def-ctx #'(v ...)))
+                                    (map drop-use-sites (syntax->list (internal-definition-context-add-scopes def-ctx #'(v ...))))
                                     #f def-ctx)])
                      (set! vals (cons #'[(v^ ...) rhs] vals))))]
                 [other-stx
@@ -2862,7 +2867,7 @@
 
     ; correct use-site binder behavior
     (test
-     '(old new)
+     '(new new)
      'define-*-definition-context
      (let ()
        (define x 'old)
